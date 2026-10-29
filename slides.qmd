@@ -1,0 +1,168 @@
+---
+title: "How Bad Could Your Stock Portfolio Losses Get?"
+subtitle: "Simulation study based on real data"
+author: "Mo Zhou PHS 7045 Midterm presentation"
+format:
+  revealjs:
+    theme: simple
+    slide-number: true
+    transition: fade
+    width: 1280
+    height: 720
+    incremental: false
+    footer: "RiskPath | Midterm project"
+execute:
+  echo: false
+---
+
+## The question {auto-animate="true"}
+
+::: r-fit-text
+One of the most important things investors care is **given a portfolio and historical market behavior, how severe could future losses become?**
+:::
+
+- Traditional estimands, e.g. Beta, variance, does not directly present tail loss/the largest downfall in a period.
+- I did a simple (right now) simulation study using bootstrap to get plausible future trajectories based on real historical data, then summarize downside risk.
+
+![](riskpath_assets/crisis.png){width="80%"}
+
+
+
+## Example portfolio for demonstration
+
+::::: columns
+::: {.column width="55%"}
+| ETF  |  Weight | Exposure                     |
+|:-----|--------:|:-----------------------------|
+| VOO  | **50%** | S&P 500                      |
+| QQQ  | **30%** | Nasdaq-100                   |
+| SCHD | **20%** | Dividend-focused US equities |
+
+**Initial investment:** \$10,000\
+**2015-01-01 through 2026-01-01**
+:::
+
+::: {.column width="45%"}
+**Simulation settings**
+
+- 150 trading days
+- 5,000 simulated paths
+- 10-day bootstrap blocks
+:::
+:::::
+
+
+
+## From market prices to daily returns
+
+1.  Download adjusted closing prices using `quantmod`.
+2.  Align trading dates across VOO, QQQ and SCHD.
+3.  Calculate daily simple returns for each ETF:
+
+$$R_{t,j}=\frac{P_{t,j}}{P_{t-1,j}}-1$$
+
+4.  Store the returns as a **days × 3 assets** matrix.
+
+::: callout-note
+returns <- na.omit(prices / lag(prices, 1) - 1)
+returns <- as.matrix(returns)
+:::
+
+
+
+## Why a block bootstrap?
+
+**Independent daily resampling** breaks the order of returns.
+
+**Block bootstrap** instead samples short runs of consecutive historical days.
+
+- Retains local patterns, including short-run volatility clustering.
+- Samples the **same historical dates for all three ETFs**, preserving their within-day co-movement.
+- Randomly joins blocks to create new return sequences.
+
+
+## Bootstrap workflow: select, join, repeat
+
+![](riskpath_assets/bootstrap.png){width="100%"}
+
+**Illustration:** choose a random starting day → take 10 consecutive rows → sample another block → put them together → truncate to 150 days.
+
+
+
+## Convert each resample into a portfolio path
+
+For simulated day $t$:
+
+$$r_{p,t}=0.50r_{VOO,t}+0.30r_{QQQ,t}+0.20r_{SCHD,t}$$
+
+$$V_t=V_{t-1}(1+r_{p,t}),\qquad V_0=\$10{,}000$$
+
+**Repeat 5,000 times** → matrix of **151 time points × 5,000 paths** (including day 0).
+
+::: callout-note
+technique used here: function, lapply, simulation
+:::
+
+## Visualizing simulated futures
+
+![](riskpath_assets/paths.png){width="100%"}
+
+
+
+
+## Measuring tail risk: VaR and ES
+
+::::: columns
+::: {.column width="57%"}
+![](riskpath_assets/var.png){width="100%"}
+:::
+
+::: {.column width="43%"}
+**Terminal loss:** $L=1-V_{150}/V_0$
+
+**95% VaR: 11.98%**
+
+95% of simulated terminal losses are at or below this threshold.
+
+**Expected Shortfall: 17.94%**
+
+Average loss among the worst 5% of outcomes.
+:::
+:::::
+
+
+## Measuring the journey: maximum drawdown
+
+::::: columns
+::: {.column width="58%"}
+![](riskpath_assets/drawdown.png){width="100%"}
+:::
+
+::: {.column width="42%"}
+$$D_s=\max_t\left(1-\frac{V_{t,s}}{\max_{u\le t}V_{u,s}}\right)$$
+
+**Mean maximum drawdown:** 11.20%
+
+**Probability of ≥20% drawdown:** 8.76%
+
+A portfolio can recover by day 150 **and still experience a severe interim decline**.
+:::
+:::::
+
+
+## Takeaways and limitations
+
+**Takeaway:** Block bootstrap turns historical multivariate ETF returns into many potential portfolio trajectories, allowing both terminal-loss and path-dependent risk assessment.
+
+**Important limitations**
+
+- Future markets may behave differently from the historical sample.
+- (Probably every model will) perform poorly when "Black Swan Event" happens, something like 2008 or COVID.
+- Block length affects how much short-run dependence is retained. Also, there is the risk of wrong cutpoint.
+- Results depend on portfolio weights, horizon and sample period.
+
+
+## Future Plans
+- Produce a R package that is able to calculate any given portfolio based on any given period.
+- Pay special attention to rare events in historical data, eg. the largest shortfall in the given period. 
+- Will produce a more complicated simulation with new introduced parameter, and potentially use Rcpp to fasten up.
