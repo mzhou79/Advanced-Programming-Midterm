@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   render:
@@ -34,7 +35,7 @@ jobs:
             any::epiworldR
 
       - name: Render slides
-        run: quarto render slides/slides.qmd --to revealjs
+        run: quarto render slides.qmd --to revealjs
 
       - name: Render report
         run: quarto render report.qmd --to html
@@ -43,15 +44,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: slides
+          if-no-files-found: error
           path: |
-            slides/*.html
-            slides/*_files/**
-            slides/riskpath_assets/**
+            slides.html
+            slides_files/**
 
       - name: Upload report
         uses: actions/upload-artifact@v4
         with:
           name: report
+          if-no-files-found: error
           path: |
             report.html
             report_files/**
