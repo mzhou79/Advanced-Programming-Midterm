@@ -33,6 +33,8 @@ jobs:
             any::data.table
             any::slurmR
             any::epiworldR
+            any::knitr
+            any::rmarkdown
 
       - name: Render slides
         run: quarto render slides.qmd --to revealjs
