@@ -69,6 +69,32 @@ $$
 
 ## Simulation
 
+### Function 1: `riskpath_sim()`
+
+The `riskpath_sim()` function generates simulated future portfolio values based on historical daily asset returns. Unlike conventional bootstrap methods that independently sample individual observations, this function samples consecutive blocks of historical returns. This approach preserves short-term temporal dependence within each block and the observed cross-asset relationships.
+
+**Inputs:**
+
+- `returns`: A numeric matrix containing historical daily returns, with rows representing trading days and columns representing assets.
+
+- `weights`: A numeric vector specifying the portfolio allocation across assets. Weights must be nonnegative and sum to one.
+
+- `initial_value`: The initial monetary value of the investment portfolio.
+
+- `horizon`: The number of trading days to simulate.
+
+- `n_sim`: The number of simulated portfolio trajectories.
+
+- `block_size`: The number of consecutive historical trading days sampled in each bootstrap block.
+
+**Output:**
+
+A numeric matrix with `horizon + 1` rows and `n_sim` columns. Each column represents one simulated portfolio trajectory, beginning with the initial portfolio value.
+
+**Implementation:**
+
+The function first validates its inputs using `stopifnot()`. It then randomly selects historical blocks with replacement, concatenates them to construct simulated return sequences, and calculates daily portfolio returns using matrix multiplication (`%*%`). Finally, `cumprod()` calculates the cumulative portfolio value over the simulation horizon.
+
 ```{r}
 # Start the function
 riskpath_sim <- function(returns, weights,
@@ -165,6 +191,7 @@ dim(paths)
 The dimension of the output should be horizon+1 times n_sim.
 
 # Results
+
 ## Calculate the estimands of interest
 
 First calculate the loss: $$
@@ -179,7 +206,37 @@ Then we calculate the esitmands of interests:
 
 3.  Maximum drawdown (MD): The average of the largest decline in portfolio value for all the simulations
 
-4.  Probability of exceeding a \[threshold\] percentage decline
+4.  Probability of exceeding a \[threshold\] percentage decline.The `riskpath_metrics()` function summarizes the simulated portfolio trajectories into interpretable financial risk measures. It allows investors to evaluate both potential terminal losses and declines occurring at any point during the investment horizon.
+
+## Function 2: `riskpath_metrics()`
+
+The `riskpath_metrics()` function summarizes the simulated portfolio trajectories into interpretable financial risk measures. It allows investors to evaluate both potential terminal losses and declines occurring at any point during the investment horizon.
+
+**Inputs:**
+
+- `paths`: A numeric matrix of simulated portfolio values produced by `riskpath_sim()`.
+
+- `confidence`: The confidence level used to calculate Value at Risk, defaulting to 0.95.
+
+- `threshold`: The maximum drawdown threshold of interest, defaulting to 0.20.
+
+**Output:**
+
+A named list containing four risk measures:
+
+1.  **Value at Risk (VaR):** The specified quantile of simulated terminal portfolio losses.
+
+2.  **Expected Shortfall (ES):** The average terminal loss among simulations at or beyond the VaR threshold.
+
+3.  **Mean Maximum Drawdown:** The average of the largest peak-to-trough percentage declines across simulated trajectories.
+
+4.  **Probability of Exceeding the Drawdown Threshold:** The proportion of simulated trajectories whose maximum drawdown reaches or exceeds the specified threshold.
+
+**Implementation:**
+
+The function uses `quantile()` and `mean()` to calculate terminal loss measures. It applies `apply()` across the columns of the simulation matrix to calculate maximum drawdown separately for each trajectory. The `cummax()` function identifies the running peak of each portfolio trajectory, allowing drawdowns to be calculated efficiently.
+
+Together, these two functions provide a reusable framework for simulating portfolio performance and quantifying potential investment losses under different portfolio configurations.
 
 ```{r}
 # Calculate
@@ -536,8 +593,9 @@ ggplot(drawdown_data, aes(x = max_drawdown)) +
 ```
 
 # AI Disclosure
-1. The workflow (block bootstrap) to simulate future data was thought by me. Then, I described my process in details and used AI to generate the code.
 
-2. Then I did a very detail breakdown and hand checked each part of the code AI generated and annotated each part in the function in details. What I did not know before is `stopifnot`, `unlist`, and `cumprod`. I learned how these function works and made sure it follows my idea.
+1.  The workflow (block bootstrap) to simulate future data was thought by me. Then, I described my process in details and used AI to generate the code.
 
-3. I used AI completely to generate the plots, although I already have an idea in mind the line graph and the histogram I want. AI nowadays is really good at visualization once you have the data and discribe what kind of relationship you want to visualize.
+2.  Then I did a very detail breakdown and hand checked each part of the code AI generated and annotated each part in the function in details. What I did not know before is `stopifnot`, `unlist`, and `cumprod`. I learned how these function works and made sure it follows my idea.
+
+3.  I used AI completely to generate the plots, although I already have an idea in mind the line graph and the histogram I want. AI nowadays is really good at visualization once you have the data and describe what kind of relationship you want to visualize.
