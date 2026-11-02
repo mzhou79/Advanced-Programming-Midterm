@@ -224,13 +224,13 @@ The `riskpath_metrics()` function summarizes the simulated portfolio trajector
 
 A named list containing four risk measures:
 
-1.  **Value at Risk (VaR):** The specified quantile of simulated terminal portfolio losses.
+1.  **Value at Risk (VaR)**
 
-2.  **Expected Shortfall (ES):** The average terminal loss among simulations at or beyond the VaR threshold.
+2.  **Expected Shortfall (ES)**
 
-3.  **Mean Maximum Drawdown:** The average of the largest peak-to-trough percentage declines across simulated trajectories.
+3.  **Mean Maximum Drawdown**
 
-4.  **Probability of Exceeding the Drawdown Threshold:** The proportion of simulated trajectories whose maximum drawdown reaches or exceeds the specified threshold.
+4.  **Probability of Exceeding the Drawdown Threshold**
 
 **Implementation:**
 
