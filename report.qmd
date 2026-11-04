@@ -1,7 +1,16 @@
 ---
 title: "Midterm project: Block Bootstrap to estimate the downfall of an investment portfolio"
-format: pdf
-editor: visual
+format:
+  pdf:
+    geometry: margin=0.8in
+    fontsize: 10pt
+    fig-width: 6.5
+    fig-height: 3.0
+execute:
+  echo: false
+  warning: false
+  message: false
+editor: source
 ---
 
 # Introduction
@@ -16,167 +25,57 @@ For the midterm part, I'm going to use three most common ETF to demonstrate my m
 
 # Method
 
-## Getting the real data (Historical prices)
+## Historical prices and daily returns
+
+The `quantmod` package retrieves adjusted ETF prices; `ggplot2` and `scales` support the plotting functions. Historical adjusted prices cover January 2015 through December 2025. For reproducible rendering, the report uses `data/prices.csv` when available, and otherwise downloads data from Yahoo Finance. The CSV should contain adjusted prices in columns `VOO`, `QQQ`, and `SCHD`, ordered by trading date.
 
 ```{r}
-library(quantmod)
-library(ggplot2)
-
+#| label: setup
+source("R/riskpath.R")
 tickers <- c("VOO", "QQQ", "SCHD")
-```
 
-The `quantmod` package is used to retrieve financial market data, while `ggplot2` is used to visualize simulated portfolio outcomes.
-
-```{r}
-prices_list <- lapply(tickers, function(ticker) {
-  x <- getSymbols(
-    ticker,
-    src = "yahoo",
-    from = "2015-01-01",
-    to = "2026-01-01",
-    auto.assign = FALSE
-  )
-  Ad(x)
-})
-
-prices <- do.call(merge, prices_list)
-colnames(prices) <- tickers
-
-prices <- na.omit(prices)
-```
-
-The `lapply()` function iterates over the three ticker symbols and applies the same downloading procedure to each asset. The data was downloaded for 01/01/2025 to 01/01/2026.
-
-## Calculating the daily return
-
-```{r}
-# Align dates and remove missing observations
-prices <- na.omit(prices)
-write.csv(prices, "prices.csv", row.names = FALSE)
-
-# Daily simple returns
-returns <- na.omit(
-  prices / lag(prices, 1) - 1
-)
-returns <- as.matrix(returns)
-```
-
-calculate the daily sample return of each of the ETF and store the value in matrix.
-
-$$
-R_t=\frac{P_t-P_{t-1}}{P_{t-1}}
-$$
-
-## Simulation
-
-### Function 1: `riskpath_sim()`
-
-The `riskpath_sim()` function generates simulated future portfolio values based on historical daily asset returns. Unlike conventional bootstrap methods that independently sample individual observations, this function samples consecutive blocks of historical returns. This approach preserves short-term temporal dependence within each block and the observed cross-asset relationships.
-
-**Inputs:**
-
-- `returns`: A numeric matrix containing historical daily returns, with rows representing trading days and columns representing assets.
-
-- `weights`: A numeric vector specifying the portfolio allocation across assets. Weights must be nonnegative and sum to one.
-
-- `initial_value`: The initial monetary value of the investment portfolio.
-
-- `horizon`: The number of trading days to simulate.
-
-- `n_sim`: The number of simulated portfolio trajectories.
-
-- `block_size`: The number of consecutive historical trading days sampled in each bootstrap block.
-
-**Output:**
-
-A numeric matrix with `horizon + 1` rows and `n_sim` columns. Each column represents one simulated portfolio trajectory, beginning with the initial portfolio value.
-
-**Implementation:**
-
-The function first validates its inputs using `stopifnot()`. It then randomly selects historical blocks with replacement, concatenates them to construct simulated return sequences, and calculates daily portfolio returns using matrix multiplication (`%*%`). Finally, `cumprod()` calculates the cumulative portfolio value over the simulation horizon.
-
-```{r}
-# Start the function
-riskpath_sim <- function(returns, weights,
-                         initial_value,
-                         horizon,
-                         n_sim,
-                         block_size) {
-
-# Input validation - making sure that there are no errors in the return data
-stopifnot(
-    is.numeric(returns),
-    all(is.finite(returns)),
-    ncol(returns) == length(weights),
-    all(weights >= 0),
-    abs(sum(weights) - 1) < 1e-8,
-    block_size >= 1,
-    block_size <= nrow(returns),
-    horizon >= 1,
-    n_sim >= 1)
-  
-  #if (!is.numeric(returns))
-  #stop("The variable `returns` is not numeric.")
-  # assertthat package
-  
-  n <- nrow(returns)
-  n_blocks <- ceiling(horizon / block_size)
-
-# Store simulated portfolio values into a matrix. I have to add an additional line because of day0 is the starting value.
-  paths <- matrix(
-    NA_real_,
-    nrow = horizon + 1,
-    ncol = n_sim
-  )
-  
-  paths[1, ] <- initial_value
-  
-
-  
-# Begin the simulation loop
-  for (s in seq_len(n_sim)) {
-    
-# Sample starting positions for blocks (you have to have block_size consectutive days, so the maximum is n-block_size+1)
-    starts <- sample.int(
-      n - block_size + 1,
-      n_blocks,
-      replace = TRUE
-    )
-    
-# Construct one simulated return sequence
-    # unlist: combine everything into ONE vector
-    # lapply: produce a list of returns, starting from the selected starting day, lasting n_block
-    idx <- unlist(lapply(
-      starts,
-      function(i) i:(i + block_size - 1)
-    ))
-    
-# Turncate into the number of horizon
-    idx <- idx[seq_len(horizon)]
-
-# Extract the simulated daily ETF return from the real data    
-    sim_returns <- returns[idx, , drop = FALSE]
-    
-# Calculate the portfolio's daily return by weights
-    portfolio_returns <- as.vector(
-      sim_returns %*% weights
-    )
-    
-# Calculate portfolio value over time by the cumulative product function *cumprod*
-    paths[-1, s] <- initial_value *
-      cumprod(1 + portfolio_returns)
+if (file.exists("data/prices.csv")) {
+  price_df <- read.csv("data/prices.csv", check.names = FALSE)
+  if (all(tickers %in% names(price_df))) {
+    prices_mat <- as.matrix(price_df[, tickers, drop = FALSE])
+  } else if (ncol(price_df) == 3L) {
+    prices_mat <- as.matrix(price_df)
+    colnames(prices_mat) <- tickers
+  } else {
+    stop("data/prices.csv must contain VOO, QQQ, and SCHD columns")
   }
-  
-  return(paths)
+} else {
+  if (!requireNamespace("quantmod", quietly = TRUE)) {
+    stop("Install quantmod or provide data/prices.csv")
+  }
+  price_list <- lapply(tickers, function(ticker) {
+    x <- quantmod::getSymbols(ticker, src = "yahoo",
+      from = "2015-01-01", to = "2026-01-01", auto.assign = FALSE)
+    quantmod::Ad(x)
+  })
+  prices <- do.call(merge, price_list)
+  colnames(prices) <- tickers
+  prices_mat <- as.matrix(stats::na.omit(prices))
 }
-
+storage.mode(prices_mat) <- "double"
+stopifnot(ncol(prices_mat) == 3L, nrow(prices_mat) > 10L,
+          all(is.finite(prices_mat)), all(prices_mat > 0))
+returns <- prices_mat[-1L, , drop = FALSE] /
+  prices_mat[-nrow(prices_mat), , drop = FALSE] - 1
 ```
 
-Test it with VOO=50%, QQQ=30%, SCHD=20%. Suppose I have a initial value of \$10,000 in my portfolio, and I want to simulate a length of 150 days, the block size (days consecutive) is 10, and I want to simulate for 5000 datasets.
+The daily simple return for each ETF is $R_t=(P_t-P_{t-1})/P_{t-1}$. The aligned return matrix has trading days in rows and assets in columns.
+
+## Moving block bootstrap: `riskpath_sim()`
+
+The documented functions are implemented separately in `R/riskpath.R` and imported using `source()`. `riskpath_sim()` samples consecutive blocks of historical returns with replacement, retaining short-term dependence within each block and contemporaneous dependence across ETFs. Its inputs are the return matrix, portfolio weights (nonnegative and summing to one), initial value, simulation horizon, number of trajectories, and block size. It returns a numeric matrix with `horizon + 1` rows and `n_sim` columns, including day zero. The simulation assumes constant weights rebalanced daily and ignores transaction costs.
+
+For the example, VOO receives 50%, QQQ 30%, and SCHD 20% of a \$10,000 portfolio. We simulate 5,000 trajectories over 150 trading days with 10-day blocks.
 
 ```{r}
+#| label: simulation
+#| echo: true
 set.seed(123)
-
 paths <- riskpath_sim(
   returns = returns,
   weights = c(0.5, 0.3, 0.2),
@@ -185,417 +84,60 @@ paths <- riskpath_sim(
   n_sim = 5000,
   block_size = 10
 )
-dim(paths)
 ```
 
-The dimension of the output should be horizon+1 times n_sim.
+## Risk summary: `riskpath_metrics()`
 
-# Results
-
-## Calculate the estimands of interest
-
-First calculate the loss: $$
-Loss=1-\frac{V_{terminal}}{V_{initial}}
-$$ Ranges from 0-1. The bigger indicates the more loss.
-
-Then we calculate the esitmands of interests:
-
-1.  Value at risk (VaR): \[confidence\] percentage of the simulated scenarios have a terminal loss no greater than the number got.
-
-2.  Expected Shortfall (ES): The average loss among the worst simulated outcomes.
-
-3.  Maximum drawdown (MD): The average of the largest decline in portfolio value for all the simulations
-
-4.  Probability of exceeding a \[threshold\] percentage decline.The `riskpath_metrics()` function summarizes the simulated portfolio trajectories into interpretable financial risk measures. It allows investors to evaluate both potential terminal losses and declines occurring at any point during the investment horizon.
-
-## Function 2: `riskpath_metrics()`
-
-The `riskpath_metrics()` function summarizes the simulated portfolio trajectories into interpretable financial risk measures. It allows investors to evaluate both potential terminal losses and declines occurring at any point during the investment horizon.
-
-**Inputs:**
-
-- `paths`: A numeric matrix of simulated portfolio values produced by `riskpath_sim()`.
-
-- `confidence`: The confidence level used to calculate Value at Risk, defaulting to 0.95.
-
-- `threshold`: The maximum drawdown threshold of interest, defaulting to 0.20.
-
-**Output:**
-
-A named list containing four risk measures:
-
-1.  **Value at Risk (VaR)**
-
-2.  **Expected Shortfall (ES)**
-
-3.  **Mean Maximum Drawdown**
-
-4.  **Probability of Exceeding the Drawdown Threshold**
-
-**Implementation:**
-
-The function uses `quantile()` and `mean()` to calculate terminal loss measures. It applies `apply()` across the columns of the simulation matrix to calculate maximum drawdown separately for each trajectory. The `cummax()` function identifies the running peak of each portfolio trajectory, allowing drawdowns to be calculated efficiently.
-
-Together, these two functions provide a reusable framework for simulating portfolio performance and quantifying potential investment losses under different portfolio configurations.
+Terminal portfolio loss is $L=1-V_{terminal}/V_{initial}$; negative loss means a gain. `riskpath_metrics()` takes the simulated paths, a VaR confidence level (default 0.95), and a maximum-drawdown threshold (default 0.20). It returns **Value at Risk (VaR)**, the 95th percentile of terminal losses; **Expected Shortfall (ES)**, mean loss in the upper 5% tail; **mean maximum drawdown**, the average of each trajectory's largest decline from its running peak; and **probability of a drawdown at least 20%**. The last output retains the name `probability_20pct_decline` for compatibility, even if a different threshold is supplied.
 
 ```{r}
-# Calculate
-riskpath_metrics <- function(paths,
-                             confidence = 0.95,
-                             threshold = 0.20) {
-  
-# Terminal portfolio losses
-  losses <- 1 - paths[nrow(paths), ] / paths[1, ]
-  
-# Value at Risk
-  VaR <- unname(quantile(losses, confidence))
-  
-# Expected Shortfall
-  ES <- mean(losses[losses >= VaR])
-  
-# Maximum decline, apply for each simulation
-  MD <- apply(paths, 2, function(p) {
-    max(1 - p / cummax(p))
-  })
-  
-  list(
-    VaR = VaR,
-    ES = ES,
-    mean_max_decline = mean(MD),
-  # The probablity that the decline exceed the [threshhold]
-    probability_20pct_decline =
-      mean(MD >= threshold)
-  )
-}
-
-results <- riskpath_metrics(paths)
+#| label: metrics
+#| echo: true
+results <- riskpath_metrics(paths, confidence = 0.95, threshold = 0.20)
 print(results)
 ```
 
-## plots
+# Results and visualization
+
+All plotting implementations also live in `R/riskpath.R`; each plotting function returns a `ggplot` object. The report calls them without duplicating their code.
+
+## Simulated portfolio paths
+
+`plot_riskpath_paths()` displays all simulated trajectories and five straight reference segments connecting the initial investment to the 5th, 25th, 50th, 75th, and 95th percentiles of terminal value. The segments summarize terminal percentiles; they are not individual simulated paths.
 
 ```{r}
-# Calculate percentiles of terminal portfolio values
-terminal_values <- paths[nrow(paths), ]
-
-percentiles <- quantile(
-  terminal_values,
-  probs = c(0.05, 0.25, 0.50, 0.75, 0.95)
-)
-
-# Prepare all original simulated paths
-plot_data <- data.frame(
-  day = rep(0:(nrow(paths) - 1), times = ncol(paths)),
-  value = as.vector(paths),
-  simulation = factor(rep(
-    seq_len(ncol(paths)),
-    each = nrow(paths)
-  ))
-)
-
-# Create five straight lines from initial to terminal values
-line_data <- data.frame(
-  percentile = factor(
-    c("5%", "25%", "50%", "75%", "95%"),
-    levels = c("5%", "25%", "50%", "75%", "95%")
-  ),
-  start_day = 0,
-  end_day = nrow(paths) - 1,
-  start_value = paths[1, 1],
-  end_value = as.numeric(percentiles)
-)
-
-# Create terminal value labels
-line_data$label <- paste0(
-  line_data$percentile,
-  ": $",
-  format(
-    round(line_data$end_value, 0),
-    big.mark = ",",
-    scientific = FALSE
-  )
-)
-
-# Plot all simulated paths and five straight percentile lines
-ggplot() +
-
-  # All 10,000 original simulated paths
-  geom_line(
-    data = plot_data,
-    aes(x = day, y = value, group = simulation),
-    alpha = 0.01,
-    color = "steelblue",
-    linewidth = 0.3
-  ) +
-
-  # Five straight lines connecting initial and terminal values
-  geom_segment(
-    data = line_data,
-    aes(
-      x = start_day,
-      y = start_value,
-      xend = end_day,
-      yend = end_value,
-      color = percentile
-    ),
-    linewidth = 1.2
-  ) +
-
-  # Label terminal values
-  geom_text(
-    data = line_data,
-    aes(
-      x = end_day,
-      y = end_value,
-      label = label,
-      color = percentile
-    ),
-    hjust = -0.1,
-    size = 3.5,
-    show.legend = FALSE
-  ) +
-
-  # Initial portfolio value
-  geom_hline(
-    yintercept = paths[1, 1],
-    linetype = "dashed",
-    color = "gray50"
-  ) +
-
-  scale_color_manual(
-    values = c(
-      "5%" = "red",
-      "25%" = "orange",
-      "50%" = "black",
-      "75%" = "darkgreen",
-      "95%" = "purple"
-    )
-  ) +
-
-  # Extra space for terminal labels
-  scale_x_continuous(
-    limits = c(0, nrow(paths) - 1 + 65),
-    breaks = seq(0, nrow(paths) - 1, by = 50)
-  ) +
-
-  scale_y_continuous(
-    labels = scales::label_dollar()
-  ) +
-
-  labs(
-    title = "Simulated Portfolio Paths with Terminal Percentiles",
-    subtitle = paste(
-      ncol(paths),
-      "simulations using moving block bootstrap"
-    ),
-    x = "Trading Day",
-    y = "Portfolio Value ($)",
-    color = "Terminal Percentile"
-  ) +
-
-  theme_minimal() +
-
-  theme(
-    plot.margin = margin(10, 70, 10, 10)
-  )
+#| label: fig-paths
+#| fig-cap: "Simulated portfolio trajectories and terminal-value percentiles"
+#| fig-height: 3.0
+plot_riskpath_paths(paths)
 ```
+
+## Value at Risk
+
+`plot_riskpath_var()` displays the distribution of terminal losses, with a dashed red line at the 95% VaR and an annotation showing how many simulations exceed that cutoff.
 
 ```{r}
-library(scales)
-
-# Set confidence level
-confidence <- 0.95
-
-# Calculate terminal losses for all simulations
-losses <- 1 - paths[nrow(paths), ] / paths[1, ]
-
-# Calculate 95% VaR
-VaR <- unname(quantile(losses, confidence))
-
-# Count simulations with losses greater than VaR
-n_exceed <- sum(losses > VaR)
-pct_exceed <- mean(losses > VaR) * 100
-
-# Create data frame
-loss_data <- data.frame(
-  loss = losses,
-  group = ifelse(losses > VaR, "Beyond VaR", "Below VaR")
-)
-
-# Plot histogram
-ggplot(loss_data, aes(x = loss)) +
-
-  # Histogram with bars colored by VaR threshold
-  geom_histogram(
-    aes(fill = after_stat(x > VaR)),
-    bins = 60,
-    color = "white"
-  ) +
-
-  # VaR threshold line
-  geom_vline(
-    xintercept = VaR,
-    color = "red",
-    linetype = "dashed",
-    linewidth = 1.2
-  ) +
-
-  # Label VaR threshold
-  annotate(
-    "text",
-    x = VaR,
-    y = Inf,
-    label = paste0(
-      "95% VaR = ", round(VaR * 100, 2), "%\n",
-      n_exceed, " simulations (",
-      round(pct_exceed, 2), "%)"
-    ),
-    hjust = -0.05,
-    vjust = 1.5,
-    color = "red",
-    size = 4
-  ) +
-
-  scale_fill_manual(
-    values = c(
-      "FALSE" = "steelblue",
-      "TRUE" = "tomato"
-    ),
-    labels = c(
-      "FALSE" = "Below VaR",
-      "TRUE" = "Beyond VaR"
-    ),
-    name = "Loss category"
-  ) +
-
-  scale_x_continuous(
-    labels = percent_format(accuracy = 1)
-  ) +
-
-  labs(
-    title = "Distribution of Simulated Portfolio Losses",
-    subtitle = paste(
-      ncol(paths),
-      "simulated portfolio outcomes"
-    ),
-    x = "Terminal Portfolio Loss (%)",
-    y = "Number of Simulations"
-  ) +
-
-  theme_minimal()
+#| label: fig-var
+#| fig-cap: "Distribution of terminal losses and 95% VaR"
+#| fig-height: 2.8
+plot_riskpath_var(paths, confidence = 0.95)
 ```
+
+## Maximum drawdown
+
+`plot_riskpath_drawdown()` displays each path's maximum peak-to-trough decline. The black dashed line marks mean maximum drawdown and the red dashed line marks the 20% threshold.
 
 ```{r}
-# Set the drawdown threshold
-threshold <- 0.20
-
-# Calculate maximum drawdown for each simulation
-max_drawdowns <- apply(paths, 2, function(p) {
-  max(1 - p / cummax(p))
-})
-
-# Calculate mean maximum drawdown
-mean_mdd <- mean(max_drawdowns)
-
-# Calculate probability of exceeding the threshold
-n_exceed <- sum(max_drawdowns >= threshold)
-prob_exceed <- mean(max_drawdowns >= threshold)
-
-# Create data frame
-drawdown_data <- data.frame(
-  max_drawdown = max_drawdowns
-)
-
-# Plot histogram
-ggplot(drawdown_data, aes(x = max_drawdown)) +
-
-  # Histogram colored by threshold
-  geom_histogram(
-    aes(fill = after_stat(x >= threshold)),
-    bins = 60,
-    color = "white"
-  ) +
-
-  # Mean maximum drawdown
-  geom_vline(
-    xintercept = mean_mdd,
-    color = "black",
-    linetype = "dashed",
-    linewidth = 1.2
-  ) +
-
-  # Threshold line
-  geom_vline(
-    xintercept = threshold,
-    color = "red",
-    linetype = "dashed",
-    linewidth = 1.2
-  ) +
-
-  # Mean MDD label
-  annotate(
-    "text",
-    x = mean_mdd,
-    y = Inf,
-    label = paste0(
-      "Mean MDD = ",
-      round(mean_mdd * 100, 2), "%"
-    ),
-    hjust = 1.05,
-    vjust = 1.5,
-    color = "black",
-    size = 4
-  ) +
-
-  # Threshold probability label
-  annotate(
-    "text",
-    x = threshold,
-    y = Inf,
-    label = paste0(
-      "Threshold = ", threshold * 100, "%\n",
-      n_exceed, " simulations (",
-      round(prob_exceed * 100, 2), "%)"
-    ),
-    hjust = -0.05,
-    vjust = 3,
-    color = "red",
-    size = 4
-  ) +
-
-  scale_fill_manual(
-    values = c(
-      "FALSE" = "steelblue",
-      "TRUE" = "tomato"
-    ),
-    labels = c(
-      "FALSE" = "Below threshold",
-      "TRUE" = "At or above threshold"
-    ),
-    name = "Decline category"
-  ) +
-
-  scale_x_continuous(
-    labels = percent_format(accuracy = 1)
-  ) +
-
-  labs(
-    title = "Distribution of Maximum Portfolio Drawdowns",
-    subtitle = paste(
-      ncol(paths),
-      "simulated portfolio trajectories"
-    ),
-    x = "Maximum Drawdown (%)",
-    y = "Number of Simulations"
-  ) +
-
-  theme_minimal()
+#| label: fig-drawdown
+#| fig-cap: "Distribution of maximum drawdowns with a 20% threshold"
+#| fig-height: 2.8
+plot_riskpath_drawdown(paths, threshold = 0.20)
 ```
+
+# Interpretation and limitations
+
+The bootstrap produces a distribution of possible portfolio outcomes conditional on historical ETF returns, the block length, and the fixed allocation. It preserves relationships within sampled 10-day blocks, but cannot guarantee that future market conditions resemble the past. The estimates do not account for transaction costs, taxes, or changes in portfolio allocation. They are scenario-based risk summaries rather than guaranteed forecasts.
 
 # AI Disclosure
 
-1.  The workflow (block bootstrap) to simulate future data was thought by me. Then, I described my process in details and used AI to generate the code.
-
-2.  Then I did a very detail breakdown and hand checked each part of the code AI generated and annotated each part in the function in details. What I did not know before is `stopifnot`, `unlist`, and `cumprod`. I learned how these function works and made sure it follows my idea.
-
-3.  I used AI completely to generate the plots, although I already have an idea in mind the line graph and the histogram I want. AI nowadays is really good at visualization once you have the data and describe what kind of relationship you want to visualize.
+I developed the idea of using a moving block bootstrap for portfolio simulation and described the intended workflow to AI, which helped generate the R implementation. I reviewed the code step by step, including unfamiliar functions such as `stopifnot()`, `unlist()`, and `cumprod()`, and checked that it followed my intended algorithm. I also used AI to help implement the visualizations from my proposed designs. The functions and plots are kept in the documented source file for inspection and reproducibility.
